@@ -18,6 +18,8 @@ My work through [vkguide.dev](https://vkguide.dev/), Victor Blanco's Vulkan guid
 
 Things I learn along the way, especially how each concept maps to what I already do in OpenGL, go in [`notes/`](notes/).
 
+The code follows the same conventions as my engine (snake_case functions and members, PascalCase types, `include/` + `src/`), not the guide's own style, so every snippet from the guide gets translated as I write it. The name map is in [`notes/naming.md`](notes/naming.md).
+
 ## Building
 
 Requirements: Windows, Visual Studio 2022, [CMake](https://cmake.org/) 3.8+ and the [Vulkan SDK](https://vulkan.lunarg.com/sdk/home).
@@ -27,7 +29,7 @@ cmake -S . -B build
 cmake --build build --config Debug
 ```
 
-Or open the folder in Visual Studio as a CMake project, select the `engine` target and press F5.
+Or open the folder in Visual Studio as a CMake project, select the `engine` target and press F5. With the generated solution (`build/vulkan_guide.sln`), set `engine` as the startup project first.
 
 ## Credits
 
