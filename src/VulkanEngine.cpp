@@ -35,6 +35,12 @@ VulkanEngine::VulkanEngine() :
     chosen_gpu(VK_NULL_HANDLE),
     device(VK_NULL_HANDLE),
     surface(VK_NULL_HANDLE),
+    swapchain(VK_NULL_HANDLE),
+    swapchain_image_format(VK_FORMAT_UNDEFINED),
+    swapchain_images(),
+    swapchain_image_views(),
+    swapchain_extent{ 0, 0 },
+    frames{},
     graphics_queue(VK_NULL_HANDLE),
     graphics_queue_family(0)
 {
@@ -64,6 +70,8 @@ void VulkanEngine::init()
         window_flags);
 
     init_vulkan();
+    init_swapchain();
+    init_commands();
 
     is_initialized = true;
 }
@@ -72,6 +80,17 @@ void VulkanEngine::shutdown()
 {
     if (is_initialized)
     {
+        // The GPU may still be using these objects: destroy nothing until it is idle
+        vkDeviceWaitIdle(device);
+
+        for (FrameData& frame : frames)
+        {
+            // Destroying the pool also frees the command buffers allocated from it
+            vkDestroyCommandPool(device, frame.command_pool, nullptr);
+        }
+
+        destroy_swapchain();
+
         vkDestroySurfaceKHR(instance, surface, nullptr);
         vkDestroyDevice(device, nullptr);
 
@@ -172,3 +191,66 @@ void VulkanEngine::init_vulkan()
     graphics_queue_family = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
 }
 
+
+void VulkanEngine::init_swapchain()
+{
+    create_swapchain(window_extent.width, window_extent.height);
+}
+
+void VulkanEngine::init_commands()
+{
+    // RESET_COMMAND_BUFFER lets us reset each buffer on its own instead of the whole pool
+    const VkCommandPoolCreateInfo pool_info = VkInit::command_pool_create_info(
+        graphics_queue_family, VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT);
+
+    for (FrameData& frame : frames)
+    {
+        VK_CHECK(vkCreateCommandPool(device, &pool_info, nullptr, &frame.command_pool));
+
+        const VkCommandBufferAllocateInfo alloc_info = VkInit::command_buffer_allocate_info(frame.command_pool, 1);
+        VK_CHECK(vkAllocateCommandBuffers(device, &alloc_info, &frame.main_command_buffer));
+    }
+}
+
+FrameData& VulkanEngine::get_current_frame()
+{
+    return frames[frame_number % k_frame_overlap];
+}
+
+void VulkanEngine::create_swapchain(const uint32 width, const uint32 height)
+{
+    swapchain_image_format = VK_FORMAT_B8G8R8A8_UNORM;  
+
+    VkSurfaceFormatKHR surface_format = {};
+    surface_format.format = swapchain_image_format;
+    surface_format.colorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
+
+    vkb::SwapchainBuilder swapchain_builder{ chosen_gpu, device, surface };
+    vkb::Swapchain vkb_swapchain = swapchain_builder
+        .set_desired_format(surface_format)
+        // FIFO = vsync. The only present mode every driver must support
+        .set_desired_present_mode(VK_PRESENT_MODE_FIFO_KHR)
+        .set_desired_extent(width, height)
+        // TRANSFER_DST so vkCmdClearColorImage (and later blits) can write to it
+        .add_image_usage_flags(VK_IMAGE_USAGE_TRANSFER_DST_BIT)
+        .build()
+        .value();
+
+    swapchain = vkb_swapchain.swapchain;
+    swapchain_extent = vkb_swapchain.extent;
+    swapchain_images = vkb_swapchain.get_images().value();
+    swapchain_image_views = vkb_swapchain.get_image_views().value();
+}
+
+void VulkanEngine::destroy_swapchain()
+{
+    // The swapchain owns its images; only the views are ours to destroy
+    for (VkImageView view : swapchain_image_views)
+    {
+        vkDestroyImageView(device, view, nullptr);
+    }
+    
+    swapchain_image_views.clear();
+
+    vkDestroySwapchainKHR(device, swapchain, nullptr);
+}

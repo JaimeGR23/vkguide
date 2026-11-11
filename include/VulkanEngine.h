@@ -5,6 +5,17 @@
 
 struct SDL_Window;
 
+// Frames de CPU may record ahead of the GPU: while the GPU draws frame N, the CPU records N+1
+constexpr uint32 k_frame_overlap = 2;
+
+// Everything one in-flight frame owns, so two frames never touch the same objects
+struct FrameData
+{
+    VkCommandPool command_pool;
+    VkCommandBuffer main_command_buffer;
+};
+
+
 class VulkanEngine
 {
 public:
@@ -19,6 +30,13 @@ public:
 
 private:
     void init_vulkan();
+    void init_swapchain();
+    void init_commands();
+
+    void create_swapchain(const uint32 width, const uint32 height);
+    void destroy_swapchain();
+
+    FrameData& get_current_frame();
 
     bool is_initialized;
     uint32 frame_number;
@@ -32,6 +50,14 @@ private:
     VkPhysicalDevice chosen_gpu;
     VkDevice device;
     VkSurfaceKHR surface;
+
+    VkSwapchainKHR swapchain;
+    VkFormat swapchain_image_format;
+    vector<VkImage> swapchain_images;
+    vector<VkImageView> swapchain_image_views;
+    VkExtent2D swapchain_extent;
+
+    FrameData frames[k_frame_overlap];
 
     VkQueue graphics_queue;
     uint32 graphics_queue_family;
