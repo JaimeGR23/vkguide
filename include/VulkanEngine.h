@@ -13,6 +13,8 @@ struct FrameData
 {
     VkCommandPool command_pool;
     VkCommandBuffer main_command_buffer;
+    VkSemaphore swapchain_semaphore;
+    VkFence render_fence;
 };
 
 
@@ -32,6 +34,7 @@ private:
     void init_vulkan();
     void init_swapchain();
     void init_commands();
+    void init_sync_structures();
 
     void create_swapchain(const uint32 width, const uint32 height);
     void destroy_swapchain();
@@ -56,6 +59,8 @@ private:
     vector<VkImage> swapchain_images;
     vector<VkImageView> swapchain_image_views;
     VkExtent2D swapchain_extent;
+    // One per swapchain image, not per frame: presentation may still be reading it
+    vector<VkSemaphore> render_semaphores;
 
     FrameData frames[k_frame_overlap];
 

@@ -40,6 +40,7 @@ VulkanEngine::VulkanEngine() :
     swapchain_images(),
     swapchain_image_views(),
     swapchain_extent{ 0, 0 },
+    render_semaphores(),
     frames{},
     graphics_queue(VK_NULL_HANDLE),
     graphics_queue_family(0)
@@ -72,6 +73,7 @@ void VulkanEngine::init()
     init_vulkan();
     init_swapchain();
     init_commands();
+    init_sync_structures();
 
     is_initialized = true;
 }
@@ -87,6 +89,8 @@ void VulkanEngine::shutdown()
         {
             // Destroying the pool also frees the command buffers allocated from it
             vkDestroyCommandPool(device, frame.command_pool, nullptr);
+            vkDestroyFence(device, frame.render_fence, nullptr);
+            vkDestroySemaphore(device, frame.swapchain_semaphore, nullptr);
         }
 
         destroy_swapchain();
@@ -191,7 +195,6 @@ void VulkanEngine::init_vulkan()
     graphics_queue_family = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
 }
 
-
 void VulkanEngine::init_swapchain()
 {
     create_swapchain(window_extent.width, window_extent.height);
@@ -209,6 +212,19 @@ void VulkanEngine::init_commands()
 
         const VkCommandBufferAllocateInfo alloc_info = VkInit::command_buffer_allocate_info(frame.command_pool, 1);
         VK_CHECK(vkAllocateCommandBuffers(device, &alloc_info, &frame.main_command_buffer));
+    }
+}
+
+void VulkanEngine::init_sync_structures()
+{
+    // Create signaled so the very first wait in draw() return inmediately
+    const VkFenceCreateInfo fence_info = VkInit::fence_create_info(VK_FENCE_CREATE_SIGNALED_BIT);
+    const VkSemaphoreCreateInfo semaphore_info = VkInit::semaphore_create_info();
+
+    for (FrameData& frame : frames)
+    {
+        VK_CHECK(vkCreateFence(device, &fence_info, nullptr, &frame.render_fence));
+        VK_CHECK(vkCreateSemaphore(device, &semaphore_info, nullptr, &frame.swapchain_semaphore));
     }
 }
 
@@ -240,10 +256,24 @@ void VulkanEngine::create_swapchain(const uint32 width, const uint32 height)
     swapchain_extent = vkb_swapchain.extent;
     swapchain_images = vkb_swapchain.get_images().value();
     swapchain_image_views = vkb_swapchain.get_image_views().value();
+
+    const VkSemaphoreCreateInfo semaphore_info = VkInit::semaphore_create_info();
+    render_semaphores.resize(swapchain_images.size());
+    for (VkSemaphore& semaphore : render_semaphores)
+    {
+        VK_CHECK(vkCreateSemaphore(device, &semaphore_info, nullptr, &semaphore));
+    }
+
 }
 
 void VulkanEngine::destroy_swapchain()
 {
+    for (VkSemaphore semaphore : render_semaphores)
+    {
+        vkDestroySemaphore(device, semaphore, nullptr);
+    }
+    render_semaphores.clear();
+
     // The swapchain owns its images; only the views are ours to destroy
     for (VkImageView view : swapchain_image_views)
     {
