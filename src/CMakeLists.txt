@@ -9,6 +9,7 @@ add_executable(engine
     VkPipelines.cpp
     VkLoader.cpp
     Camera.cpp
+    DeletionQueue.cpp
     ${INCLUDE_DIR}/Types.h
     ${INCLUDE_DIR}/Vulkan.h
     ${INCLUDE_DIR}/VulkanEngine.h
@@ -18,6 +19,7 @@ add_executable(engine
     ${INCLUDE_DIR}/VkPipelines.h
     ${INCLUDE_DIR}/VkLoader.h
     ${INCLUDE_DIR}/Camera.h
+    ${INCLUDE_DIR}/DeletionQueue.h
 )
 
 set_property(TARGET engine PROPERTY CXX_STANDARD 20)

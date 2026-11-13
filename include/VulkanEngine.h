@@ -3,6 +3,8 @@
 #include <Types.h>
 #include <Vulkan.h>
 
+#include <DeletionQueue.h>
+
 struct SDL_Window;
 
 // Frames de CPU may record ahead of the GPU: while the GPU draws frame N, the CPU records N+1
@@ -15,6 +17,7 @@ struct FrameData
     VkCommandBuffer main_command_buffer;
     VkSemaphore swapchain_semaphore;
     VkFence render_fence;
+    DeletionQueue deletion_queue;
 };
 
 
@@ -63,6 +66,9 @@ private:
     vector<VkSemaphore> render_semaphores;
 
     FrameData frames[k_frame_overlap];
+
+    // Objects that live as long as the engine, destroyed in shutdown()
+    DeletionQueue main_deletion_queue;
 
     VkQueue graphics_queue;
     uint32 graphics_queue_family;

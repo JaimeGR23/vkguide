@@ -43,6 +43,7 @@ VulkanEngine::VulkanEngine() :
     swapchain_extent{ 0, 0 },
     render_semaphores(),
     frames{},
+    main_deletion_queue(),
     graphics_queue(VK_NULL_HANDLE),
     graphics_queue_family(0)
 {
@@ -92,7 +93,10 @@ void VulkanEngine::shutdown()
             vkDestroyCommandPool(device, frame.command_pool, nullptr);
             vkDestroyFence(device, frame.render_fence, nullptr);
             vkDestroySemaphore(device, frame.swapchain_semaphore, nullptr);
+            frame.deletion_queue.flush();
         }
+
+        main_deletion_queue.flush();
 
         destroy_swapchain();
 
@@ -114,6 +118,8 @@ void VulkanEngine::draw()
 
     // Wait until the GPU has finished the last submission that used this frame's objects
     VK_CHECK(vkWaitForFences(device, 1, &frame.render_fence, VK_TRUE, k_one_second_ns));
+    // The GPU has finished this frame: whatever it used can be destroyed now
+    frame.deletion_queue.flush();
     VK_CHECK(vkResetFences(device, 1, &frame.render_fence));
 
     uint32 swapchain_image_index = 0;
