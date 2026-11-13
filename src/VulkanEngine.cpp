@@ -13,6 +13,10 @@
 #include <cmath>
 #include <thread>
 
+// VMA is header-only: exactly one  .cpp must compile its implementation
+#define VMA_IMPLEMENTATION
+#include <vk_mem_alloc.h>
+
 
 namespace
 {
@@ -36,6 +40,7 @@ VulkanEngine::VulkanEngine() :
     chosen_gpu(VK_NULL_HANDLE),
     device(VK_NULL_HANDLE),
     surface(VK_NULL_HANDLE),
+    allocator(VK_NULL_HANDLE),
     swapchain(VK_NULL_HANDLE),
     swapchain_image_format(VK_FORMAT_UNDEFINED),
     swapchain_images(),
@@ -246,6 +251,22 @@ void VulkanEngine::init_vulkan()
 
     graphics_queue = vkb_device.get_queue(vkb::QueueType::graphics).value();
     graphics_queue_family = vkb_device.get_queue_index(vkb::QueueType::graphics).value();
+
+    // VMA chooses the memory type and sub-allocates big blocks, like malloc for GPU memory
+    VmaAllocatorCreateInfo allocator_info = {};
+    allocator_info.physicalDevice = chosen_gpu;
+    allocator_info.device = device;
+    allocator_info.instance = instance;
+    allocator_info.vulkanApiVersion = VK_API_VERSION_1_3;
+    // We enabled bufferDeviceAddress in 1.1; VMA has to know it to allocate those buffers (chapter 3)
+    allocator_info.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+    VK_CHECK(vmaCreateAllocator(&allocator_info, &allocator));
+
+    main_deletion_queue.push_function([this]()
+    {
+        vmaDestroyAllocator(allocator);
+    });
+
 }
 
 void VulkanEngine::init_swapchain()

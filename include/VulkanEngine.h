@@ -57,6 +57,8 @@ private:
     VkDevice device;
     VkSurfaceKHR surface;
 
+    VmaAllocator allocator;
+
     VkSwapchainKHR swapchain;
     VkFormat swapchain_image_format;
     vector<VkImage> swapchain_images;
