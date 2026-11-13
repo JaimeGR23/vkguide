@@ -1,5 +1,6 @@
 #include <VulkanEngine.h>
 
+#include <VkImages.h>
 #include <VkInitializers.h>
 
 #include <SDL.h>
@@ -21,7 +22,7 @@ namespace
     constexpr bool k_use_validation_layers = true;
 
     // 1 second, in nanoseconds: Vulkan timeouts are always in nanoseconds
-    constexpr uint64 k_one_nanosecond_ns = 1000000000;
+    constexpr uint64 k_one_second_ns = 1000000000;
 }
 
 VulkanEngine::VulkanEngine() :
@@ -109,6 +110,52 @@ void VulkanEngine::shutdown()
 
 void VulkanEngine::draw()
 {
+    FrameData& frame = get_current_frame();
+
+    // Wait until the GPU has finished the last submission that used this frame's objects
+    VK_CHECK(vkWaitForFences(device, 1, &frame.render_fence, VK_TRUE, k_one_second_ns));
+    VK_CHECK(vkResetFences(device, 1, &frame.render_fence));
+
+    uint32 swapchain_image_index = 0;
+    VK_CHECK(vkAcquireNextImageKHR(device, swapchain, k_one_second_ns, frame.swapchain_semaphore, VK_NULL_HANDLE, &swapchain_image_index));
+
+    VkCommandBuffer cmd = frame.main_command_buffer;
+    VK_CHECK(vkResetCommandBuffer(cmd, 0));
+
+    const VkCommandBufferBeginInfo begin_info = VkInit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    VK_CHECK(vkBeginCommandBuffer(cmd, &begin_info));
+
+    VkImage image = swapchain_images[swapchain_image_index];
+
+    // UNDEFINED as the old layout: we overwrite the whole image, so its old contents can be discarded
+    VkUtil::transition_image(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+
+    const float32 flash = std::abs(std::sin(static_cast<float32>(frame_number) / 120.0f));
+    const VkClearColorValue clear_value = { {0.0f, 0.0f, flash, 1.0f} };
+    const VkImageSubresourceRange clear_range = VkInit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
+    vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_GENERAL, &clear_value, 1, &clear_range);
+
+    VkUtil::transition_image(cmd, image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+    VK_CHECK(vkEndCommandBuffer(cmd));
+
+    // Wait for the image to be acquired before writing to it; signal when rendering is done
+    VkCommandBufferSubmitInfo cmd_info = VkInit::command_buffer_submit_info(cmd);
+    VkSemaphoreSubmitInfo wait_info = VkInit::semaphore_submit_info(VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, frame.swapchain_semaphore);
+    VkSemaphoreSubmitInfo signal_info = VkInit::semaphore_submit_info(VK_PIPELINE_STAGE_2_ALL_GRAPHICS_BIT, render_semaphores[swapchain_image_index]);
+
+    const VkSubmitInfo2 submit = VkInit::submit_info(&cmd_info, &signal_info, &wait_info);
+    VK_CHECK(vkQueueSubmit2(graphics_queue, 1, &submit, frame.render_fence));
+
+    VkPresentInfoKHR present_info = VkInit::present_info();
+    present_info.swapchainCount = 1;
+    present_info.pSwapchains = &swapchain;
+    present_info.waitSemaphoreCount = 1;
+    present_info.pWaitSemaphores = &render_semaphores[swapchain_image_index];
+    present_info.pImageIndices = &swapchain_image_index;
+    VK_CHECK(vkQueuePresentKHR(graphics_queue, &present_info));
+
+    frame_number++;
 }
 
 void VulkanEngine::run()
