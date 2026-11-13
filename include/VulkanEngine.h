@@ -4,6 +4,7 @@
 #include <Vulkan.h>
 
 #include <DeletionQueue.h>
+#include <VkImages.h>
 
 struct SDL_Window;
 
@@ -41,6 +42,7 @@ private:
 
     void create_swapchain(const uint32 width, const uint32 height);
     void destroy_swapchain();
+    void draw_background(VkCommandBuffer cmd);
 
     FrameData& get_current_frame();
 
@@ -66,6 +68,10 @@ private:
     VkExtent2D swapchain_extent;
     // One per swapchain image, not per frame: presentation may still be reading it
     vector<VkSemaphore> render_semaphores;
+
+    // We draw here, then copy it to the swapchain image
+    AllocatedImage draw_image;
+    VkExtent2D draw_extent;
 
     FrameData frames[k_frame_overlap];
 

@@ -47,6 +47,8 @@ VulkanEngine::VulkanEngine() :
     swapchain_image_views(),
     swapchain_extent{ 0, 0 },
     render_semaphores(),
+    draw_image{},
+    draw_extent{ 0, 0 },
     frames{},
     main_deletion_queue(),
     graphics_queue(VK_NULL_HANDLE),
@@ -136,17 +138,23 @@ void VulkanEngine::draw()
     const VkCommandBufferBeginInfo begin_info = VkInit::command_buffer_begin_info(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
     VK_CHECK(vkBeginCommandBuffer(cmd, &begin_info));
 
-    VkImage image = swapchain_images[swapchain_image_index];
+    draw_extent.width = draw_image.image_extent.width;
+    draw_extent.height = draw_image.image_extent.height;
 
     // UNDEFINED as the old layout: we overwrite the whole image, so its old contents can be discarded
-    VkUtil::transition_image(cmd, image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
+    // GENERAL is the layour compute shaders write in
+    VkUtil::transition_image(cmd, draw_image.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
 
-    const float32 flash = std::abs(std::sin(static_cast<float32>(frame_number) / 120.0f));
-    const VkClearColorValue clear_value = { {0.0f, 0.0f, flash, 1.0f} };
-    const VkImageSubresourceRange clear_range = VkInit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
-    vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_GENERAL, &clear_value, 1, &clear_range);
+    draw_background(cmd);
 
-    VkUtil::transition_image(cmd, image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    // Copy the draw image into the swapchain image
+    VkImage swapchain_image = swapchain_images[swapchain_image_index];
+    VkUtil::transition_image(cmd, draw_image.image, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+    VkUtil::transition_image(cmd, swapchain_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+    VkUtil::copy_image_to_image(cmd, draw_image.image, swapchain_image, draw_extent, swapchain_extent);
+
+    VkUtil::transition_image(cmd, swapchain_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
     VK_CHECK(vkEndCommandBuffer(cmd));
 
@@ -272,6 +280,37 @@ void VulkanEngine::init_vulkan()
 void VulkanEngine::init_swapchain()
 {
     create_swapchain(window_extent.width, window_extent.height);
+
+    // Window size for now. In chapter 3 it keeps its size when the window is resized
+    const VkExtent3D draw_image_extent = { window_extent.width, window_extent.height, 1 };
+
+    // 16-bit float per channel: more precision and range than the 8-bit swapchain
+    draw_image.image_format = VK_FORMAT_R16G16B16A16_SFLOAT;
+    draw_image.image_extent = draw_image_extent;
+
+    VkImageUsageFlags draw_image_usages = 0;
+    draw_image_usages |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;       // copied to the swapchain
+    draw_image_usages |= VK_IMAGE_USAGE_TRANSFER_DST_BIT;       // cleared with vkCmdClearColorImage
+    draw_image_usages |= VK_IMAGE_USAGE_STORAGE_BIT;            // written by compute shaders
+    draw_image_usages |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;   // drawn into by graphics pipelines (chapter 3)
+
+    const VkImageCreateInfo image_info = VkInit::image_create_info(draw_image.image_format, draw_image_usages, draw_image_extent);
+
+    // VRAM only: the CPU never reads or writes this image
+    VmaAllocationCreateInfo image_alloc_info = {};
+    image_alloc_info.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    image_alloc_info.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+
+    VK_CHECK(vmaCreateImage(allocator, &image_info, &image_alloc_info, &draw_image.image, &draw_image.allocation, nullptr));
+
+    const VkImageViewCreateInfo view_info = VkInit::imageview_create_info(draw_image.image_format, draw_image.image, VK_IMAGE_ASPECT_COLOR_BIT);
+    VK_CHECK(vkCreateImageView(device, &view_info, nullptr, &draw_image.image_view));
+
+    main_deletion_queue.push_function([this]()
+    {
+        vkDestroyImageView(device, draw_image.image_view, nullptr);
+        vmaDestroyImage(allocator, draw_image.image, draw_image.allocation);
+    });
 }
 
 void VulkanEngine::init_commands()
@@ -357,4 +396,13 @@ void VulkanEngine::destroy_swapchain()
     swapchain_image_views.clear();
 
     vkDestroySwapchainKHR(device, swapchain, nullptr);
+}
+
+void VulkanEngine::draw_background(VkCommandBuffer cmd)
+{
+    // Same flash as chapter 1, now on the draw image. In 2.5 a compute shader replaces it
+    const float32 flash = std::abs(std::sin(static_cast<float32>(frame_number) / 120.0f));
+    const VkClearColorValue clear_value = { { 0.0f, 0.0f, flash, 1.0f } };
+    const VkImageSubresourceRange clear_range = VkInit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
+    vkCmdClearColorImage(cmd, draw_image.image, VK_IMAGE_LAYOUT_GENERAL, &clear_value, 1, &clear_range);
 }
