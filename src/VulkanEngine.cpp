@@ -49,6 +49,9 @@ VulkanEngine::VulkanEngine() :
     render_semaphores(),
     draw_image{},
     draw_extent{ 0, 0 },
+    global_descriptor_allocator(),
+    draw_image_descriptors(VK_NULL_HANDLE),
+    draw_image_descriptor_layout(VK_NULL_HANDLE),
     frames{},
     main_deletion_queue(),
     graphics_queue(VK_NULL_HANDLE),
@@ -83,6 +86,7 @@ void VulkanEngine::init()
     init_swapchain();
     init_commands();
     init_sync_structures();
+    init_descriptors();
 
     is_initialized = true;
 }
@@ -339,6 +343,37 @@ void VulkanEngine::init_sync_structures()
         VK_CHECK(vkCreateFence(device, &fence_info, nullptr, &frame.render_fence));
         VK_CHECK(vkCreateSemaphore(device, &semaphore_info, nullptr, &frame.swapchain_semaphore));
     }
+}
+
+void VulkanEngine::init_descriptors()
+{
+    // Room for 10 sets with one storage image each
+    const DescriptorAllocator::PoolSizeRatio pool_ratios[] =
+    {
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1.0f }
+    };
+    global_descriptor_allocator.init_pool(device, 10, pool_ratios);
+
+    // Binding 0: one storage image, read and written by compute shaders
+    DescriptorLayoutBuilder builder;
+    builder.add_binding(0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
+    draw_image_descriptor_layout = builder.build(device, VK_SHADER_STAGE_COMPUTE_BIT);
+
+    draw_image_descriptors = global_descriptor_allocator.allocate(device, draw_image_descriptor_layout);
+
+    // Point binding 0 of the new set at the draw image
+    VkDescriptorImageInfo image_info = {};
+    image_info.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    image_info.imageView = draw_image.image_view;
+
+    const VkWriteDescriptorSet write = VkInit::write_descriptor_image(VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, draw_image_descriptors, &image_info, 0);
+    vkUpdateDescriptorSets(device, 1, &write, 0, nullptr);
+
+    main_deletion_queue.push_function([this]()
+    {
+        global_descriptor_allocator.destroy_pool(device);
+        vkDestroyDescriptorSetLayout(device, draw_image_descriptor_layout, nullptr);
+    });
 }
 
 FrameData& VulkanEngine::get_current_frame()

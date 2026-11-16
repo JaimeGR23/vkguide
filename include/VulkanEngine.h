@@ -4,6 +4,7 @@
 #include <Vulkan.h>
 
 #include <DeletionQueue.h>
+#include <VkDescriptors.h>
 #include <VkImages.h>
 
 struct SDL_Window;
@@ -39,6 +40,7 @@ private:
     void init_swapchain();
     void init_commands();
     void init_sync_structures();
+    void init_descriptors();
 
     void create_swapchain(const uint32 width, const uint32 height);
     void destroy_swapchain();
@@ -72,6 +74,10 @@ private:
     // We draw here, then copy it to the swapchain image
     AllocatedImage draw_image;
     VkExtent2D draw_extent;
+
+    DescriptorAllocator global_descriptor_allocator;
+    VkDescriptorSet draw_image_descriptors;
+    VkDescriptorSetLayout draw_image_descriptor_layout;
 
     FrameData frames[k_frame_overlap];
 
