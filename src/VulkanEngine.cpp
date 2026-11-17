@@ -2,6 +2,7 @@
 
 #include <VkImages.h>
 #include <VkInitializers.h>
+#include <VkPipelines.h>
 
 #include <SDL.h>
 #include <SDL_vulkan.h>
@@ -27,6 +28,21 @@ namespace
 
     // 1 second, in nanoseconds: Vulkan timeouts are always in nanoseconds
     constexpr uint64 k_one_second_ns = 1000000000;
+
+    // VKGUIDE_SHADER_DIR comes from CMake: the abosule path of shaders/, where the .spv files are built
+    VkShaderModule load_shader(VkDevice device, const char* file_name)
+    {
+        const string path = string(VKGUIDE_SHADER_DIR) + file_name;
+
+        VkShaderModule shader_module = VK_NULL_HANDLE;
+        if (!VkUtil::load_shader_module(path.c_str(), device, &shader_module))
+        {
+            fmt::println("Failed to load shader {}", path);
+            std::abort();
+        }
+        return shader_module;
+    }
+
 }
 
 VulkanEngine::VulkanEngine() :
@@ -52,6 +68,8 @@ VulkanEngine::VulkanEngine() :
     global_descriptor_allocator(),
     draw_image_descriptors(VK_NULL_HANDLE),
     draw_image_descriptor_layout(VK_NULL_HANDLE),
+    background_pipeline_layout(VK_NULL_HANDLE),
+    gradient_pipeline(VK_NULL_HANDLE),
     frames{},
     main_deletion_queue(),
     graphics_queue(VK_NULL_HANDLE),
@@ -87,6 +105,7 @@ void VulkanEngine::init()
     init_commands();
     init_sync_structures();
     init_descriptors();
+    init_pipelines();
 
     is_initialized = true;
 }
@@ -376,6 +395,38 @@ void VulkanEngine::init_descriptors()
     });
 }
 
+void VulkanEngine::init_pipelines()
+{
+    init_background_pipeline();
+}
+
+void VulkanEngine::init_background_pipeline()
+{
+    // The layour lists what the shader recieves: here, one descriptor set (the draw image)
+    VkPipelineLayoutCreateInfo layout_info = VkInit::pipeline_layout_create_info();
+    layout_info.setLayoutCount = 1;
+    layout_info.pSetLayouts = &draw_image_descriptor_layout;
+    VK_CHECK(vkCreatePipelineLayout(device, &layout_info, nullptr, &background_pipeline_layout));
+
+    VkShaderModule gradient_shader = load_shader(device, "gradient.comp.spv");
+
+    VkComputePipelineCreateInfo pipeline_info = {};
+    pipeline_info.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO;
+    pipeline_info.pNext = nullptr;
+    pipeline_info.layout = background_pipeline_layout;
+    pipeline_info.stage = VkInit::pipeline_shader_stage_create_info(VK_SHADER_STAGE_COMPUTE_BIT, gradient_shader);
+    VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &gradient_pipeline));
+
+    // The pipeline keeps its own compiled copy: the module is no longer needed
+    vkDestroyShaderModule(device, gradient_shader, nullptr);
+
+    main_deletion_queue.push_function([this]()
+    {
+        vkDestroyPipelineLayout(device, background_pipeline_layout, nullptr);
+        vkDestroyPipeline(device, gradient_pipeline, nullptr);
+    });
+}
+
 FrameData& VulkanEngine::get_current_frame()
 {
     return frames[frame_number % k_frame_overlap];
@@ -435,9 +486,11 @@ void VulkanEngine::destroy_swapchain()
 
 void VulkanEngine::draw_background(VkCommandBuffer cmd)
 {
-    // Same flash as chapter 1, now on the draw image. In 2.5 a compute shader replaces it
-    const float32 flash = std::abs(std::sin(static_cast<float32>(frame_number) / 120.0f));
-    const VkClearColorValue clear_value = { { 0.0f, 0.0f, flash, 1.0f } };
-    const VkImageSubresourceRange clear_range = VkInit::image_subresource_range(VK_IMAGE_ASPECT_COLOR_BIT);
-    vkCmdClearColorImage(cmd, draw_image.image, VK_IMAGE_LAYOUT_GENERAL, &clear_value, 1, &clear_range);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, gradient_pipeline);
+
+    // Set 0 in the shader = draw_image_descriptors
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, background_pipeline_layout, 0, 1, &draw_image_descriptors, 0, nullptr);
+
+    // The shader runs in 16x16 workgroups: round up so the right and bottom edges are covered too
+    vkCmdDispatch(cmd, (draw_extent.width + 15) / 16, (draw_extent.height + 15) / 16, 1);
 }

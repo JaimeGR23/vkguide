@@ -25,6 +25,8 @@ add_executable(engine
 set_property(TARGET engine PROPERTY CXX_STANDARD 20)
 target_compile_definitions(engine PUBLIC GLM_FORCE_DEPTH_ZERO_TO_ONE)
 target_include_directories(engine PUBLIC "${INCLUDE_DIR}")
+# Absolute path of shaders/, so the engine finds the .spv files whatever its working directory is
+target_compile_definitions(engine PRIVATE VKGUIDE_SHADER_DIR="${PROJECT_SOURCE_DIR}/shaders/")
 
 target_link_libraries(engine PUBLIC vma glm Vulkan::Vulkan fmt::fmt stb_image SDL2::SDL2 vkbootstrap imgui fastgltf::fastgltf)
 
@@ -36,3 +38,6 @@ if(WIN32)
         COMMAND_EXPAND_LISTS
     )
 endif()
+
+# Building the engine also compiles any shader that changed
+add_dependencies(engine Shaders)

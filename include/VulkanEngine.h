@@ -41,6 +41,8 @@ private:
     void init_commands();
     void init_sync_structures();
     void init_descriptors();
+    void init_pipelines();
+    void init_background_pipeline();
 
     void create_swapchain(const uint32 width, const uint32 height);
     void destroy_swapchain();
@@ -78,6 +80,9 @@ private:
     DescriptorAllocator global_descriptor_allocator;
     VkDescriptorSet draw_image_descriptors;
     VkDescriptorSetLayout draw_image_descriptor_layout;
+
+    VkPipelineLayout background_pipeline_layout;
+    VkPipeline gradient_pipeline;
 
     FrameData frames[k_frame_overlap];
 
